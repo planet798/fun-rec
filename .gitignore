@@ -9,3 +9,9 @@ tests/
 rec_train_set.sample.txt
 .env
 *.egg-info
+# Local Python environment
+.venv/
+
+# Locally trained Gensim/Word2Vec models (including auxiliary arrays)
+*.model
+*.model.*
