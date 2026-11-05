@@ -16,7 +16,7 @@
 
 ## 个人练习（Fork 扩展）
 
-本 Fork 的学习代码与实验记录整理在 [practice/README.md](./practice/README.md)，目前包含 Skip-gram 训练样本构造、Item2Vec 召回及 MovieLens-1M 离线评测。此目录为个人学习实践，非 Datawhale 上游官方内容。
+本 Fork 的个人代码和实验记录见 [practice/README.md](./practice/README.md)，目前包括 I2I（Item2Vec/EGES 等练习）、双塔（FM/DSSM/YouTubeDNN 模块）、MIND/SDM 序列召回与 MovieLens-1M 验证实验；Trinity 尚在学习。`practice/` 与上游 `src/funrec/` 代码区分，部分脚本仅为模块练习，不应视为完整工业系统。
 
 ## 📖 章节目录
 

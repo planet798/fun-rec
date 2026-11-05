@@ -15,3 +15,6 @@ rec_train_set.sample.txt
 # Locally trained Gensim/Word2Vec models (including auxiliary arrays)
 *.model
 *.model.*
+
+# Local sequence-retrieval checkpoints (MIND / SDM)
+practice/Sequential_Retrieval/**/*.pt

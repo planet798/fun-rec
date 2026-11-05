@@ -1,110 +1,62 @@
-# FunRec 个人学习实践
+# FunRec 个人 PyTorch 推荐算法学习与复现实验
 
-本目录用于在阅读 [Datawhale FunRec](https://github.com/datawhalechina/fun-rec) 教程的过程中，独立实现核心练习、理解源码并验证推荐效果。此目录为个人 Fork 新增内容，与上游官方实现分开维护。
+本目录是基于 [Datawhale FunRec](https://github.com/datawhalechina/fun-rec) 教程开展的**个人练习代码**，与仓库中的上游 `src/funrec/` 官方实现区分维护。目标是独立理解模型关键组件、手写 PyTorch 训练/推理代码、比较离线结果；**不是完整工业推荐系统**，也不代表所有论文模型的逐项完整复现。
 
-## 目录结构
+## 个人练习结构
 
-```text
-practice/
-├── word2vec/
-│   └── skipgram_pairs.py       # Skip-gram 滑动窗口与正样本构造
-└── item2vec/
-    ├── item2vec_train.py       # 小规模商品序列：向量训练与 I2I 相似度
-    └── item2vec_movielens.py   # MovieLens-1M：U2I 召回、冷启动统计、基线对比
-```
+| 方向 | 文件位置 | 实践内容与当前范围 |
+| --- | --- | --- |
+| I2I 召回 | `I2I/word2vec/`, `I2I/item2vec/` | Skip-gram 正样本构造、Gensim Item2Vec、MovieLens-1M 用户向量召回与基线评估 |
+| I2I 延伸 | `I2I/eges/`, `I2I/airbnb/` | EGES 加权嵌入、Airbnb 上下文相关模块练习；不声明完成全流程离线评估 |
+| 双塔/特征交互 | `two_tower/` | FM 二阶交互、DSSM 用户/物品编码、YouTubeDNN 历史池化与采样 Softmax 等模块级 PyTorch 练习 |
+| 序列召回 | `Sequential_Retrieval/mind/` | MIND 胶囊网络、多兴趣动态路由、标签感知注意力、训练及验证 |
+| 序列召回 | `Sequential_Retrieval/sdm/` | SDM 长短期兴趣、LSTM/多头注意力、门控融合、训练与 Top-10 验证 |
+| 流式索引 | `Streaming_Index/trinity/` | Trinity 聚类相关学习代码；仍在练习，不作为已完成系统 |
 
-## 实践内容
+序列召回的详细评估协议与限制见 [Sequential_Retrieval/README.md](Sequential_Retrieval/README.md)。
 
-### 1. Skip-gram 训练样本
+## 数据与已核验实验
 
-`word2vec/skipgram_pairs.py` 使用滑动窗口，为每个中心词生成上下文正样本；主要练习 `enumerate()`、`range()`、列表与索引边界。**不包含完整的 Word2Vec 神经网络训练**。
+### Item2Vec / MovieLens-1M（2026-10-28）
 
-### 2. Item2Vec：玩具商品数据
+1. 仅保留 `rating >= 4` 作为正反馈，按用户和时间排序，并保留至少两条正反馈的用户。
+2. 每个用户末次正反馈作为测试目标，其余历史训练 Item2Vec；使用平均历史电影向量生成用户表征。
+3. 过滤已看电影，计算 HR@10，并与同数据划分下的 Popularity 比较。
 
-`item2vec/item2vec_train.py` 基于 Gensim Word2Vec（`sg=1`）学习商品向量，通过 NumPy 实现余弦相似度计算、已查询商品过滤、Top-3 排序。仅用于验证数据结构与算法流程，样本量很小，不用于评价实际推荐质量。
-
-### 3. Item2Vec：MovieLens-1M
-
-`item2vec/item2vec_movielens.py` 读取 MovieLens-1M 评分数据，按以下流程构造并评测推荐系统：
-
-1. 只保留 `rating >= 4` 的正反馈。
-2. 按用户 ID、时间戳排序；保留至少有 2 条正反馈的用户。
-3. 每位用户最后一条正反馈作测试目标，之前的交互作训练历史（Leave-Last-Out）。
-4. 使用训练历史学习电影 Embedding；以历史电影向量的**均值**作为用户向量。
-5. 依据向量相似度召回，过滤用户已交互电影，计算 `HR@10` 与 `Warm HR@10`。
-6. 在相同数据切分下，计算 Popularity Top-10 基线。
-
-**Word2Vec 训练配置：**
-
-| 参数 | 值 |
-| --- | --- |
-| `vector_size` | 32 |
-| `window` | 5 |
-| `min_count` | 1 |
-| `sg` | 1（Skip-gram） |
-| `workers` | 1 |
-| `epochs` | 10 |
-| `seed` | 42 |
-
-## 实验结果
-
-实验日期：2026-10-28。数据：MovieLens-1M，正反馈评分阈值 4，Leave-Last-Out，排除历史已交互电影。
-
-| 模型 | HR@10 |
+| 方法 | HR@10 |
 | --- | ---: |
-| Item2Vec（平均池化用户向量） | **1.5239%** |
-| Popularity | **4.0749%** |
+| Item2Vec（历史向量平均池化） | 1.5239% |
+| Popularity | 4.0749% |
 
-辅助指标：Item2Vec 的 `Warm HR@10 = 1.5247%`，`Cold Item Rate = 0.0497%`。测试用户 **6,037** 人，其中测试电影属于训练词表的用户 **6,034** 人、冷启动测试电影对应用户 **3** 人；Item2Vec 命中 **92** 人。
+测试用户 6,037 人，Item2Vec 命中 92 人；Warm HR@10 约为 1.5247%，Cold Item Rate 约为 0.0497%。**本次实验中热门推荐更好**；仅测试过单组参数，不代表 Item2Vec 在其他条件下普遍较差。训练词表外的电影不可被该 Item2Vec 模型召回；历史过滤也可能排除用户重复交互的测试目标。
 
-**结果解读：** 该实验中 Popularity 优于 Item2Vec；目前只测试了单组超参数，且用户表示使用均值池化，不能由此推断 Item2Vec 一般不如热门推荐。当前向量召回无法直接召回训练词表外的冷启动电影。
+### MIND / SDM（MovieLens-1M，验证集）
 
-**评测边界：** 由于按交互记录留出最后一次正反馈，若某部电影之前已出现在同一用户的训练历史中，则测试目标会被历史过滤规则排除，成为不可命中样本。该实验尚未对这种重复交互情形单独做调整。离线指标仅供本次练习使用，不可直接与其他数据划分上的指标比较。
+- 正反馈采用 `rating >= 4`；按用户时间序列构造训练前缀、验证目标与留出测试目标。
+- 当前报告的是**验证集** HR@10，尚未使用独立测试集完成最终对比。
+- SDM 为简化实现：最近最多 10 条历史构造短期兴趣，之前最多 40 条构造长期兴趣；未完整复现论文的多特征建模。
 
-## 运行说明
+| 方法 / 配置 | Val HR@10 |
+| --- | ---: |
+| Popularity | 3.76% |
+| MIND（routing_std=0.5） | 5.00% |
+| SDM（1 Epoch） | 4.6396% |
+| SDM（3 Epoch） | 6.8600% |
+| SDM（5 Epoch） | 8.8981% |
 
-在仓库根目录执行（示例环境为 WSL / Linux）：
+SDM（5 Epoch）命中 537/6035，Warm HR@10 约为 8.9055%。不同模型训练预算、输入长度及参数配置并未完全对齐，**不能将此表解释为公平的架构优劣比较**。详情、现有检查点和运行说明见序列召回 README。
 
-```bash
-# 本地 Gensim、NumPy、Pandas 环境准备完毕后
-python practice/word2vec/skipgram_pairs.py
-python practice/item2vec/item2vec_train.py
+## 使用与复现说明
 
-# MovieLens 评测：先配置数据路径并准备已训练模型
-python practice/item2vec/item2vec_movielens.py
-```
+- 推荐使用 Python 3.12、PyTorch、NumPy、Pandas、Gensim；具体依赖视练习脚本而定。
+- 练习按独立脚本组织，**没有统一的一键训练入口**；部分脚本仅演示张量维度、前向计算或局部训练步骤。
+- MovieLens-1M 的 `ratings.dat` 需由使用者自行获取；部分练习中的本地路径尚需手动修改。
+- 序列召回评估脚本依赖先行训练并保存的本地模型检查点；不上传 `.pt` 权重。
+- Item2Vec 模型文件 `.model` 也不上传；换机器运行评测之前需按同样切分与参数重新训练。
+- 训练集、验证集、测试集和线上业务指标不能混同；这里没有线上 A/B 测试、真实服务或全流程性能保障。
 
-依赖包：`gensim`、`numpy`、`pandas`。具体可按你的 Python 环境安装；仓库根目录已有独立的官方依赖配置。
+## 代码来源与边界
 
-**数据集：** [MovieLens-1M（GroupLens）](https://grouplens.org/datasets/movielens/1m/)。下载并解压后，把 `item2vec_movielens.py` 中的 `path` 改为本机 `ratings.dat` 的路径（格式为 `user_id::movie_id::rating::timestamp`）。
+本仓库为 [Datawhale FunRec](https://github.com/datawhalechina/fun-rec) 的个人 Fork。原有 `src/funrec/` 和教程文档属于上游项目；`practice/` 下的练习是本人跟随教程与源码独立编写/调试的实现。部分模型只是关键组件重写，不应写作“原创提出模型”或“完整复现官方所有模块”。
 
-**模型文件与复现注意：** 当前 `item2vec_movielens.py` 使用 `Word2Vec.load("practice/item2vec/item2vec_ml1m.model")`，因此新环境运行评测前必须先用上述训练配置、相同数据切分生成并保存该模型；仅克隆 GitHub 仓库不能直接运行这份评测脚本。模型产物通过 `.gitignore` 排除，不上传 GitHub。运行命令应在仓库根目录执行，确保相对模型路径正确。
-
-一个最小的模型生成片段（在数据预处理产生 `train_histories` 后执行）：
-
-```python
-from gensim.models import Word2Vec
-
-model = Word2Vec(
-    sentences=train_histories,
-    vector_size=32,
-    window=5,
-    min_count=1,
-    sg=1,
-    workers=1,
-    epochs=10,
-    seed=42,
-)
-model.save("practice/item2vec/item2vec_ml1m.model")
-```
-
-上述模型训练与当前评测脚本分开运行，避免每次调试评测都重复训练。
-
-## 学习记录
-
-- 熟悉 Python 集合、列表推导式、`zip()`、`Counter`，以及 Pandas `groupby().agg(list)` 等数据处理操作。
-- 理解 Skip-gram 样本构造与商品 Embedding 的训练、查询。
-- 实现基于用户历史平均 Embedding 的 Top-K 召回，完成冷启动统计及 Popularity 基线对比。
-- 后续按 FunRec 教程继续学习 EGES、DSSM、YouTubeDNN、精排等模型。
-
-> 本目录是学习练习，不应被描述为生产级推荐系统或已经完成的工业部署项目。
+**求职简历建议**：优先强调 PyTorch Embedding/Attention、数据集与 Mask、负采样、训练循环、Top-K 评估，以及 MIND/SDM 的实验差异与边界；不要将上述验证指标包装为生产环境收益。
