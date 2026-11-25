@@ -1,0 +1,6 @@
+services:
+  backend:
+    build:
+      dockerfile: dockerfile.funrec-local
+    volumes:
+      - ../src:/app/src:ro

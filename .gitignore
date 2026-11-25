@@ -9,12 +9,33 @@ tests/
 rec_train_set.sample.txt
 .env
 *.egg-info
+
 # Local Python environment
 .venv/
 
-# Locally trained Gensim/Word2Vec models (including auxiliary arrays)
+# Locally trained Gensim/Word2Vec models
 *.model
 *.model.*
 
 # Local sequence-retrieval checkpoints (MIND / SDM)
 practice/Sequential_Retrieval/**/*.pt
+
+# Local development environment
+node_modules/
+*.pyc
+
+# Model artifacts and datasets
+*.pkl
+*.npy
+*.npz
+*.h5
+*.keras
+*.pth
+*.pt
+*.ckpt
+saved_models/
+deployed_models/
+data/
+
+# Local logs
+*.log

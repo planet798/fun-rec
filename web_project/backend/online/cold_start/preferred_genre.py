@@ -57,7 +57,7 @@ class PreferredGenreStrategy(ColdStartStrategy):
             query = {
                 "bool": {
                     "must": [
-                        {"terms": {"genres.keyword": preferred_genres}}
+                        {"terms": {"genres": preferred_genres}}
                     ],
                     "filter": [
                         {"range": {"avg_rating": {"gte": 6.0}}},  # 优质电影

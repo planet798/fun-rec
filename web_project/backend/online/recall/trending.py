@@ -107,17 +107,17 @@ class UserPreferenceRecallStrategy(RecallStrategy):
             # 或者我们传入了错误的参数
             # 实际上，"terms" 查询格式为: "terms": { "field": [values] }
             
-            # 尝试 match 查询（bool should 子句）或在 genres.keyword 上使用 terms（如果可用）
+            # 尝试 match 查询（bool should 子句）或在 genres 上使用 terms（如果可用）
             # 根据报错，可能需要使用 "terms" 但要确保字段映射正确
             # 如果报错持续，可能是字段类型为 text
             
-            # 如果索引为 keyword 则使用 'genres.keyword'，或者使用显式映射的 'genres'
+            # 如果索引为 keyword 则使用 'genres'，或者使用显式映射的 'genres'
             # 最安全的做法是尝试 'genres.keyword' 或使用 bool should match 查询
             
             query = {
                 "bool": {
                     "must": [
-                         {"terms": {"genres.keyword": frequent_genres}}
+                         {"terms": {"genres": frequent_genres}}
                     ],
                     "filter": [
                         {"range": {"avg_rating": {"gte": 5}}},

@@ -198,7 +198,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { movieApi, getPosterUrl } from '../services/api'
 import { useAuthStore } from '../stores/auth'
@@ -278,6 +278,15 @@ const fetchMovieDetails = async () => {
     loading.value = false
   }
 }
+
+watch(() => route.params.id, () => {
+  loading.value = true
+  movie.value = null
+  cast.value = []
+  crew.value = null
+  showPosterPlaceholder.value = false
+  fetchMovieDetails()
+})
 
 onMounted(fetchMovieDetails)
 </script>

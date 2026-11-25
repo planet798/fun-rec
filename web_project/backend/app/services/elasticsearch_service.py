@@ -89,7 +89,7 @@ class ElasticsearchService:
         except:
             return False
     
-    async def create_index(self, delete_existing: bool = False) -> bool:
+    def create_index(self, delete_existing: bool = False) -> bool:
         """使用正确的映射创建电影索引"""
         if not self.is_available():
             logger.warning("Elasticsearch 不可用，跳过索引创建")

@@ -46,10 +46,13 @@ class RecallService:
         # 初始化召回策略
         self.strategies: List[RecallStrategy] = [                                    
             UserPreferenceRecallStrategy(),
-            # ItemEmbeddingRecallStrategy(),
-            # GlobalTrendingRecallStrategy(),
-            # YouTubeDNNRecallStrategy(),
+            ItemEmbeddingRecallStrategy(),
+            GlobalTrendingRecallStrategy(),
+            YouTubeDNNRecallStrategy(),
         ]
+
+        self.merge_strategy = "weighted"
+        self.weights = [4, 0, 6, 0]
         
         self.initialized = True
         logger.info("召回服务初始化完成, 多通道策略.")
@@ -147,6 +150,50 @@ class RecallService:
         logger.info(f"RecallService._merge_results_round_robin, 召回结果: {len(merged_candidates)}")
         return merged_candidates
 
+    def _merge_results_weighted(
+        self, results_list, weights, top_k
+    ):
+        result = []
+        seen = set()
+        pointers = [0] * len(results_list)
+
+        sources = [
+            r if isinstance(r, list) else []
+            for r in results_list
+        ]
+
+        while len(result) < top_k:
+            added = False
+
+            for i, weight in enumerate(weights):
+                count = 0
+
+                while (
+                    count < weight
+                    and pointers[i] < len(sources[i])
+                ):
+                    item = sources[i][pointers[i]]
+                    pointers[i] += 1
+
+                    mid = item["movie_id"]
+
+                    if mid in seen:
+                        continue
+
+                    result.append(item)
+                    seen.add(mid)
+
+                    count += 1
+                    added = True
+
+                    if len(result) >= top_k:
+                        return result
+
+            if not added:
+                break
+
+        return result
+
     async def recommend(self, user_features: Dict[str, Any], top_k: int = 50) -> List[Dict[str, Any]]:
         """
         协调多通道召回
@@ -162,16 +209,66 @@ class RecallService:
             for k, v in redis_features.items():
                 if k not in user_features or not user_features[k]:
                     user_features[k] = v
-        
+
+        # 获取用户历史交互电影
+        history_ids = {
+            int(mid)
+            for mid in user_features.get("hist_movie_ids", [])
+        }
+
         tasks = []
-        for strategy in self.strategies:
-            tasks.append(strategy.recall(user_features, top_k))
-            
-        # 并行执行
-        results_list = await asyncio.gather(*tasks, return_exceptions=True)
+        active_indices = []
+
+        recall_k = top_k + len(history_ids)
+
+        for i, strategy in enumerate(self.strategies):
+
+            if (
+                self.merge_strategy == "weighted"
+                and self.weights[i] == 0
+            ):
+                continue
+
+            tasks.append(
+                strategy.recall(user_features, recall_k)
+            )
+
+            active_indices.append(i)
+
+        active_results = await asyncio.gather(
+            *tasks, return_exceptions=True
+        )
+
+        results_list = [[] for _ in self.strategies]
+
+        for i, results in zip(active_indices, active_results):
+            results_list[i] = results
+
+        if user_id:
+            history_ids.update(
+                int(mid)
+                for mid in redis_features.get("hist_movie_ids", [])
+            )
+
+        # 过滤各通道中的历史电影
+        for i, results in enumerate(results_list):
+            if isinstance(results, list):
+                results_list[i] = [
+                    item for item in results
+                    if int(item["movie_id"]) not in history_ids
+                ]
         
         # 使用轮询合并结果
-        return self._merge_results_round_robin(results_list, top_k)
+        if self.merge_strategy == "weighted":
+            return self._merge_results_weighted(
+                results_list,
+                self.weights,
+                top_k
+            )
+
+        return self._merge_results_round_robin(
+            results_list, top_k
+        )
         
     # 辅助方法：暴露遗留代码期望的资源属性（可选）
     @property

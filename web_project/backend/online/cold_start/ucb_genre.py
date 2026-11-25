@@ -304,7 +304,7 @@ class UCBGenreStrategy(ColdStartStrategy):
                 query = {
                     "bool": {
                         "must": [
-                            {"term": {"genres.keyword": genre}}
+                            {"term": {"genres": genre}}
                         ],
                         "filter": [
                             {"range": {"avg_rating": {"gte": 6.0}}},

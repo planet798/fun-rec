@@ -1,121 +1,369 @@
-# FunRec Recsys
+# FunRec Recsys —— 电影推荐系统
 
-一个完整的电影推荐系统示例项目，涵盖离线训练、在线服务、前端展示的全流程实现。基于 MovieLens-1M 数据集构建。
+基于 Datawhale Fun-Rec 第 10 章构建的电影推荐系统，基于 MovieLens-1M 数据集，实现从离线模型训练、在线多路召回、精排到前端展示的完整推荐链路。
 
-**核心特性**：
-- **多路召回**：YoutubeDNN 向量召回 + I2I 相似度召回 + 偏好类目召回，Snake Merge 融合
-- **精准排序**：DeepFM 点击率预测模型
-- **冷启动处理**：UCB 类型探索算法，平衡探索与利用
-- **多样性重排**：类型/年代连续打散，避免信息茧房
-- **完整工程链路**：特征工程 → 模型训练 → 在线服务 → 前端交互
+在官方项目复现的基础上，进一步开展源码分析、召回策略扩展、融合算法优化、时间切分评估及在线推理性能优化。
 
+**上游项目：** [Datawhale Fun-Rec](https://github.com/datawhalechina/fun-rec)
 
-## 功能概览
+## 1. 项目介绍
 
-**前端**：首页推荐、电影详情、搜索、用户认证、个人中心
+本项目采用经典的推荐系统级联架构：
 
-**离线流水线** (`backend/offline/`)：
-- 特征工程 → 召回模型训练（YoutubeDNN）→ 排序模型训练（DeepFM）
-- 模型部署（本地目录）→ 特征上线（Redis）
+- **召回（Recall）：** 从海量电影中快速筛选用户可能感兴趣的候选电影。
+- **精排（Ranking）：** 使用 DeepFM 预测用户对候选电影的偏好。
+- **重排（Re-ranking）：** 根据电影类型和年代调整推荐列表，提高结果多样性。
 
-**在线流水线** (`backend/online/`)：
-- 冷启动检测 → 多路召回（YoutubeDNN + I2I + 偏好类目）→ 精排（DeepFM）→ 重排（打散）→ 结果组装
+项目支持用户注册、登录、电影搜索、电影详情、评分及个性化推荐。
 
-**存储**：PostgreSQL（业务数据）、Redis（特征缓存）、Elasticsearch（搜索索引）
+## 2. 技术栈
 
-## 本地运行
-### 1. 下载数据[funrec-movielens-1m.zip](https://funrec-datasets.s3.eu-west-3.amazonaws.com/funrec-movielens-1m.zip)并且解压，记录数据绝对路径
+| 模块 | 技术 |
+|---|---|
+| 前端 | Vue 3、Tailwind CSS、Pinia、Vue Router |
+| 后端 | Python 3.11、FastAPI |
+| 推荐模型 | YouTubeDNN、DeepFM |
+| 数据库 | PostgreSQL |
+| 缓存 | Redis |
+| 搜索 | Elasticsearch |
+| 部署 | Docker、Docker Compose、Nginx |
+| 模型框架 | TensorFlow 2.15 |
 
-### 2. 复制.env.example为.env，并设置数据绝对路径`FUNREC_RAW_DATA_PATH`为第一步记录的数据绝对路径。`FUNREC_PROCESSED_DATA_PATH`为处理后的数据的缓存**绝对路径**，自由设置。
+## 3. 系统架构
 
-### 3. 运行infra
+### 3.1 整体架构
+
+```text
+             Vue 3 前端
+                  |
+                  v
+             Nginx 反向代理
+                  |
+                  v
+             FastAPI 服务
+                  |
+          用户特征与历史行为
+                  |
+                  v
+             冷启动判断
+                  |
+                  v
+              多路召回
+          /       |       \
+         /        |        \
+  UserPreference  ItemEmbedding
+         \        |        /
+          GlobalTrending
+                 |
+             YouTubeDNN
+                 |
+                 v
+             候选融合
+                 |
+                 v
+             DeepFM 精排
+                 |
+                 v
+             多样性重排
+                 |
+                 v
+              推荐结果
+```
+
+### 3.2 数据存储
+
+- PostgreSQL：存储用户、电影、评分等核心业务数据。
+- Redis：缓存用户画像、历史行为及偏好特征。
+- Elasticsearch：提供电影搜索及索引能力。
+
+### 3.3 离线流水线
+
+```text
+原始 MovieLens 数据
+        |
+        v
+     特征工程
+        |
+        +----------+
+        |          |
+        v          v
+    YouTubeDNN   DeepFM
+        |          |
+        v          v
+    电影向量     排序模型
+        |          |
+        +-----+----+
+              |
+              v
+          模型部署
+              |
+              v
+        Redis 特征上线
+```
+
+## 4. 核心算法
+
+### 4.1 多路召回
+
+项目包含四路召回策略：
+
+| 召回通道 | 核心思路 |
+|---|---|
+| UserPreference | 根据用户历史行为及偏好类型召回 |
+| ItemEmbedding | 根据用户历史电影的向量表示检索相似电影 |
+| GlobalTrending | 根据全局电影热度进行召回 |
+| YouTubeDNN | 利用用户塔和物品塔向量进行相似度检索 |
+
+YouTubeDNN 使用双塔结构，将用户和电影映射到统一向量空间，通过向量相似度获取候选电影。
+
+ItemEmbedding 与 YouTubeDNN 分别承担基于历史物品相似度的召回和用户兴趣向量召回任务。
+
+### 4.2 多路召回融合
+
+原始项目采用 Snake Merge 进行多路候选融合。
+
+在此基础上，实现了可配置的 Weighted Merge（加权轮询融合）。
+
+其核心思想是为不同召回通道分配不同的候选配额，而不是直接对各路召回分数进行加权求和。
+
+当前实验选择：
+
+```python
+weights = [4, 0, 6, 0]
+```
+
+对应：
+
+- UserPreference：40%
+- ItemEmbedding：0%
+- GlobalTrending：60%
+- YouTubeDNN：0%
+
+融合过程中进行候选去重，并跳过零权重通道的实际召回计算。
+
+### 4.3 DeepFM 精排
+
+使用 DeepFM 对召回候选进行偏好预测。
+
+模型结合：
+
+- FM：建模二阶特征交互。
+- DNN：学习高阶非线性特征组合。
+
+离线复现记录：
+
+- Test AUC：0.8388
+- gAUC：0.8434
+
+### 4.4 多样性重排
+
+根据电影类型和年代调整候选列表，减少推荐结果过度集中于某一类电影的问题。
+
+## 5. 自主改进与实验
+
+### 5.1 全局时间切分
+
+为避免随机划分导致的时间信息泄露，重新构建全局时间切分实验：
+
+| 数据集 | 交互数量 |
+|---|---:|
+| Train | 800164 |
+| Validation | 100024 |
+| Test | 100021 |
+
+使用训练集历史交互不少于 5 次的用户开展评估。
+
+最终有效评估规模：
+
+| 数据集 | 用户数 | 有效交互数 |
+|---|---:|---:|
+| Validation | 520 | 23639 |
+| Test | 1002 | 80298 |
+
+### 5.2 消融实验与融合优化
+
+分别评估四路召回及不同融合策略。
+
+使用验证集选择融合权重，并在测试集上进行最终评估。
+
+测试集结果：
+
+| 策略 | HR@100 | Recall@100 | NDCG@100 |
+|---|---:|---:|---:|
+| UserPreference | 0.8633 | 0.1813 | 0.1479 |
+| ItemEmbedding | 0.7305 | 0.1040 | 0.0961 |
+| GlobalTrending | 0.8992 | 0.2184 | 0.2225 |
+| YouTubeDNN | 0.6936 | 0.0672 | 0.0672 |
+| SnakeMerge | 0.9291 | 0.2149 | 0.1711 |
+| WeightedMerge | **0.9411** | **0.2670** | 0.2224 |
+
+相比原始 Snake Merge：
+
+- Recall@100 相对提升 24.24%。
+- NDCG@100 相对提升 29.98%。
+- HR@100 相对提升 1.29%。
+
+注：GlobalTrending 的 NDCG@100 为 0.2225，略高于 WeightedMerge 的 0.2224。因此，加权融合并非所有单项指标都取得最优结果。
+
+### 5.3 在线召回性能优化
+
+针对在线服务进行了以下改进：
+
+1. 支持根据权重跳过不参与融合的召回通道。
+2. 增加历史交互电影过滤。
+3. 使用超额召回补充过滤造成的候选损失。
+4. 实现可配置的加权轮询融合。
+5. 保留原始 Snake Merge 作为对照方案。
+
+单用户预热后执行 10 次测试：
+
+| 指标 | SnakeMerge | WeightedMerge |
+|---|---:|---:|
+| 平均耗时 | 316.35 ms | 86.45 ms |
+| 中位耗时 | 313.89 ms | 84.52 ms |
+| 最终候选数量 | 100 | 100 |
+| 历史电影重合数 | 0 | 0 |
+
+平均召回耗时降低约 72.67%。
+
+注：该耗时为召回服务测试结果，不代表完整推荐请求的端到端延迟，也不代表高并发场景下的性能。
+
+## 6. 工程改进
+
+在源码复现过程中，完成了以下问题排查和修复：
+
+- 解决 SQLAlchemy 版本兼容问题。
+- 修复 Elasticsearch 索引创建过程中的同步/异步调用问题。
+- 修复用户偏好召回中的 Elasticsearch 字段错误。
+- 修复电影详情页面路由切换后未重新加载数据的问题。
+- 修复在线召回过程中的字段错误。
+- 完成四路召回的独立测试和在线集成。
+- 增加召回融合算法的边界测试。
+
+## 7. 项目部署
+
+### 环境要求
+
+- Python 3.11
+- Docker Desktop
+- Docker Compose
+- Node.js
+- uv
+
+### 配置环境变量
+
+复制环境变量模板：
+
+```bash
+cp .env.example .env
+```
+
+配置：
+
+- FUNREC_RAW_DATA_PATH：原始数据目录。
+- FUNREC_PROCESSED_DATA_PATH：处理后数据目录。
+
+### 启动基础设施
+
 ```bash
 docker compose up --build
 ```
 
-### 4. 加载数据
-* 安装 [uv 包管理器](https://docs.astral.sh/uv/getting-started/installation/)
-* 进入 backend 目录
+### 安装后端依赖
+
 ```bash
 cd backend
-```
-
-* 同步依赖（需要 Python 3.11，因为 TensorFlow 2.15 仅支持该版本）
-```bash
 uv sync --python 3.11
 ```
 
-* 加载数据到数据库
+### 数据导入
+
 ```bash
 make ingest-data-to-database
 ```
-此命令会：
-1. **重建表结构**：删除并重新创建所有数据库表
-2. **导入核心数据**：
-   - 用户数据（~6000 用户，含性别、年龄、职业等）
-   - 电影数据（~4000 部电影，含类型、年份、IMDb 评分等）
-   - 评分数据（~100 万条用户-电影评分记录）
-3. **导入 IMDb 元数据**：演员、导演、编剧、别名等
-4. **计算统计信息**：基于评分数据更新每部电影的平均分和评分数
-5. **创建测试用户**：`test@funrec.com` / `test123456`（管理员权限，偏好 Sci-Fi）
 
-* 索引电影到 Elasticsearch（支持搜索功能）
+注意：该命令会重建数据库表，不要在已有重要数据的环境中直接执行。
+
+### Elasticsearch 索引
+
 ```bash
 make index-movies-to-elasticsearch
 ```
-此命令会：
-1. 连接 Elasticsearch 并创建索引（如不存在）
-2. 从 PostgreSQL 读取所有电影数据
-3. 批量写入 Elasticsearch（含标题、类型、年份、评分等字段）
-4. 完成后即可使用前端搜索功能
 
-* 运行离线 pipeline（特征处理、模型训练、部署上线）
+### 离线模型训练及部署
+
 ```bash
 make run-offline-pipeline
 ```
-此命令会按顺序执行以下步骤：
 
-| 步骤 | 说明 | 代码 |
-|------|------|------|
-| **1. 召回特征处理** | 构建用户行为序列、编码类别特征 | `offline/feature/preprocess_retrieval.py` |
-| **2. 排序特征处理** | 构建正负样本（困难负样本+随机负样本） | `offline/feature/preprocess_ranking.py` |
-| **3. 召回模型训练** | 训练 YoutubeDNN 双塔模型 | `offline/training/train_retrieval.py` |
-| **4. 排序模型训练** | 训练 DeepFM 点击率预测模型 | `offline/training/train_ranking.py` |
-| **5. 特征上线** | 写入 Redis：用户画像、行为历史、偏好类目 | `offline/storage/redis_ingest.py` |
-| **6. 模型部署** | 部署到本地共享目录：模型文件、向量、词表 | `offline/storage/local_deploy.py` |
+### 服务检查
 
-> 首次运行约需 5-10 分钟（含模型训练），后续可通过 `--steps` 参数单独运行某个步骤
-
-### 5. 检查服务是否正常运行
-
-* 检查后端
 ```bash
 curl http://localhost:8000/health
 ```
 
-* elasticsearch
-```bash
-curl http://localhost:9200
-```
+### 前端访问
 
-* 检查数据库
-```bash
-docker exec -it funrec-postgres pg_isready -U funrec
-```
-
-### 6. 访问前端
-```bash
+```text
 http://localhost:3000
 ```
-测试用户
-- Email: test@funrec.com
-- Password: test123456
 
+测试账号：
 
-## 测试
-
-```bash
-cd backend
-uv sync --python 3.11 --extra dev
-make test
+```text
+Email: test@funrec.com
+Password: test123456
 ```
+
+以上为上游项目的标准部署流程。本地 WSL2 开发环境使用的 Compose 覆盖配置需根据实际仓库文件另行配置。
+
+## 8. 项目结构
+
+```text
+web_project/
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   ├── models/
+│   │   └── services/
+│   ├── offline/
+│   │   ├── feature/
+│   │   ├── training/
+│   │   └── storage/
+│   └── online/
+│       ├── cold_start/
+│       ├── recall/
+│       ├── ranking/
+│       └── reranking/
+│
+├── frontend/
+│   └── src/
+│       ├── components/
+│       ├── views/
+│       ├── router/
+│       └── services/
+│
+└── experiments/
+    ├── temporal_split.py
+    ├── prepare_temporal_data.py
+    ├── train_temporal_retrieval.py
+    ├── eval_temporal_val.py
+    ├── eval_temporal_test.py
+    └── RESULTS.md
+```
+
+## 9. 当前局限与后续方向
+
+- 当前实验重点集中在召回层，尚未独立验证 DeepFM 精排及多样性重排的增益。
+- 冷启动用户尚未纳入本轮时间切分评估。
+- 在线性能测试尚未覆盖高并发场景。
+- 需要进一步完善 Redis 历史行为与 PostgreSQL 数据的一致性。
+- 后续可研究动态召回权重、实时兴趣更新及模型推理优化。
+
+## 10. 致谢
+
+本项目基于 [Datawhale Fun-Rec](https://github.com/datawhalechina/fun-rec) 第 10 章官方电影推荐系统项目进行复现和二次改进。
+
+感谢 Datawhale 及原项目贡献者提供的学习资料和开源代码。
+
+原项目遵循 CC BY-NC-SA 4.0 许可协议，相关衍生成果应遵守原项目许可要求。
